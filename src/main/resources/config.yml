@@ -1,0 +1,41 @@
+# HttpHub 設定
+# 讓伺服器上所有插件共用同一個 HTTP 端口。缺少的項目會在啟動與 /httphub reload 時自動補上。
+config-version: 1
+
+# 聊天室訊息前綴
+prefix: "&8[&bHttpHub&8] &r"
+
+server:
+  # 綁定的位址；0.0.0.0 = 所有網卡
+  host: "0.0.0.0"
+  # TCP 端口，記得在防火牆開放。不能和其他自己開 HTTP 伺服器的程式用同一個號碼
+  port: 52010
+  # 玩家下載用的網址根目錄
+  #   auto：使用玩家連線時輸入的位址加上上面的端口（例如玩家用 play.example.com 連線，就是 http://play.example.com:52010）
+  #   在反向代理（Nginx 等）後面時，填完整網址，例如 "https://files.example.com"
+  public-url: "auto"
+  # 處理執行緒數量（2～64）
+  threads: 8
+  # 等待處理的連線最多幾個（8～1024），排滿時新連線直接關閉
+  queue: 64
+
+limits:
+  # 同一 IP 同時最多幾個連線（含排隊中）
+  max-connections-per-ip: 4
+  # 同一 IP 每秒最多幾個請求
+  requests-per-second: 20
+  # 傳送、讀取或處理中連續幾秒沒有進度就切斷（5～300）
+  stall-seconds: 15
+  # 讀取請求標頭的時限（秒，2～60）
+  header-timeout-seconds: 10
+  # POST 內容上限（KB，0～10240）
+  max-body-kb: 64
+  # 反向代理的 IP（例如 "127.0.0.1"）：不受連線數限制，並改用 X-Forwarded-For 當作玩家 IP
+  # 沒有用反向代理請保持空白，否則任何人都能偽造 IP
+  trusted-proxies: []
+
+update-checker:
+  # 啟動時在後台檢查 GitHub 上的新版本
+  check-on-startup: true
+  # 有新版本時，擁有 httphub.version 權限的人登入 3 秒後收到提醒
+  notify-on-join: true

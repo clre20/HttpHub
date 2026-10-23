@@ -1,0 +1,69 @@
+# HttpHub 訊息
+# 支援 & 顏色碼與 &#RRGGBB；{名稱} 為變數。缺少的項目會自動補上。
+
+command:
+  unknown: "&c未知的指令，輸入 &f/{label} help &c查看說明"
+  no-permission: "&c你沒有權限使用這個指令"
+  reloaded: "&a已重新載入設定（端口 {port}）"
+  reload-failed: "&c已重新載入設定，但端口 {port} 無法開啟，詳情請看後台"
+
+help:
+  header: "&bHttpHub &7v{version}"
+  line: " &f/{label} {sub} &7- {desc}"
+  help: "顯示這個說明"
+  version: "查看版本並檢查更新"
+  status: "查看伺服器狀態與各插件註冊的路徑"
+  reload: "重新載入設定"
+
+status:
+  header: "&bHttpHub 狀態"
+  "on": "&a運作中"
+  "off": "&c未開啟"
+  server: " &7伺服器：{state} &7（{host}:{port}）"
+  stats: " &7已處理 &f{served} &7個請求、送出 &f{bytes}&7、拒絕 &f{rejected} &7個連線，目前連線 &f{active}"
+  routes-header: " &7已註冊的路徑（{count}）："
+  route: "  &7- &f{path} &8[{plugin}] &7{kind}"
+  kind-static: "檔案 {size}"
+  kind-exact: "動態"
+  kind-prefix: "動態（含子路徑）"
+  more: "  &7…還有 {count} 個"
+  no-routes: " &7目前沒有插件註冊路徑"
+
+version:
+  current: "&fHttpHub &7版本 &e{version}"
+  checking: "&7正在檢查更新…"
+  failed: "&7檢查更新失敗：{reason}"
+  newer: "&a有新版本 &e{latest}&a（目前 {current}）！下載：&f{url}"
+  latest: "&a目前已是最新版本"
+  dev: "&e目前版本比 GitHub 新（開發版）"
+  join-notify: "&e[HttpHub] 有新版本 &f{latest}&e（目前 {current}），下載：&f{url}"
+  reason-no-release: "目前還沒有發佈版本"
+  reason-http: "GitHub 回應 {code}"
+  reason-no-tag: "讀不到版本號"
+  reason-offline: "無法連線到 GitHub"
+
+# 瀏覽器看到的錯誤頁面（純文字）
+http-error:
+  "400": "400 請求格式錯誤"
+  "404": "404 找不到這個路徑"
+  "405": "405 不支援這個請求方法"
+  "411": "411 需要 Content-Length"
+  "413": "413 內容太大"
+  "429": "429 請求太頻繁，請稍後再試"
+  "431": "431 請求標頭太大"
+  "500": "500 伺服器處理時發生錯誤"
+  other: "發生錯誤"
+
+console:
+  config-filled: "config.yml 已自動補上 {count} 個缺少的項目"
+  messages-filled: "messages.yml 已自動補上 {count} 個缺少的項目"
+  started: "HTTP 伺服器已在 {host}:{port} 開啟，對外網址：{url}"
+  url-auto: "自動（使用玩家連線的位址）"
+  start-failed: "HTTP 伺服器無法在端口 {port} 開啟：{reason}（是否有其他程式在用這個端口？）"
+  routes-removed: "{plugin} 正在停用，已移除它的 {count} 個路徑"
+  handler-error: "處理 {route} 時發生錯誤：{reason}"
+  bad-proxy: "trusted-proxies 裡的「{value}」不是 IP，已略過"
+  update-newer: "有新版本 {latest}（目前 {current}）：{url}"
+  update-latest: "目前已是最新版本"
+  update-dev: "目前版本比 GitHub 新（開發版）"
+  update-failed: "檢查更新失敗：{reason}"

@@ -1,0 +1,39 @@
+name: HttpHub
+description: 讓伺服器上所有插件共用一個 HTTP 端口
+prefix: HttpHub
+version: '${version}'
+
+main: clre20.httpHub.HttpHub
+api-version: '1.21'
+load: STARTUP
+website: https://github.com/clre20/HttpHub
+
+authors: [ Clre20 ]
+
+commands:
+  httphub:
+    description: HttpHub 指令
+    usage: /<command> [help|version|status|reload]
+    aliases: [ hhub ]
+
+permissions:
+  httphub.help:
+    description: 查看指令說明
+    default: true
+  httphub.version:
+    description: 查看版本並檢查更新，有新版時登入會收到提醒
+    default: op
+  httphub.status:
+    description: 查看伺服器狀態與各插件註冊的路徑
+    default: op
+  httphub.reload:
+    description: 重新載入設定
+    default: op
+  httphub.*:
+    description: 所有 HttpHub 權限
+    default: op
+    children:
+      httphub.help: true
+      httphub.version: true
+      httphub.status: true
+      httphub.reload: true
