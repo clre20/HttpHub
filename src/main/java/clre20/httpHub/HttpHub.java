@@ -32,6 +32,8 @@ public final class HttpHub extends JavaPlugin implements Listener {
     private UpdateChecker updates;
     private UpdateNotifier updateNotifier;
 
+    private clre20.httpHub.client.ClientHubManager clientHub;
+
     @Override
     public void onEnable() {
         config = new PluginConfig(this);
@@ -44,6 +46,10 @@ public final class HttpHub extends JavaPlugin implements Listener {
         server.errorText(errorTexts());
         service = new HubService(routes, server, config::publicUrl, config::port);
         getServer().getServicesManager().register(HttpHubService.class, service, this, ServicePriority.Normal);
+
+        clientHub = new clre20.httpHub.client.ClientHubManager(this);
+        getServer().getServicesManager().register(clre20.httpHub.api.HttpHubClientService.class, clientHub, this, ServicePriority.Normal);
+        getServer().getPluginManager().registerEvents(clientHub, this);
 
         updates = new UpdateChecker(getPluginMeta().getVersion());
         updateNotifier = new UpdateNotifier(this);
@@ -139,4 +145,5 @@ public final class HttpHub extends JavaPlugin implements Listener {
     public HubServer server() { return server; }
     public UpdateChecker updates() { return updates; }
     public UpdateNotifier updateNotifier() { return updateNotifier; }
+    public clre20.httpHub.client.ClientHubManager clientHub() { return clientHub; }
 }

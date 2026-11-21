@@ -72,20 +72,33 @@ public final class HubCommand implements TabExecutor {
         plugin.messages().raw(sender, "status.stats", "served", server.served(), "bytes", size(server.bytesOut()),
                 "rejected", server.rejected(), "active", server.activeConnections());
         List<RouteTable.Info> list = plugin.routes().snapshot();
-        if (list.isEmpty()) {
-            plugin.messages().raw(sender, "status.no-routes");
-            return;
-        }
-        plugin.messages().raw(sender, "status.routes-header", "count", list.size());
-        int shown = 0;
-        for (RouteTable.Info r : list) {
-            if (shown++ >= MAX_LINES) {
-                plugin.messages().raw(sender, "status.more", "count", list.size() - MAX_LINES);
-                break;
+        if (!list.isEmpty()) {
+            plugin.messages().raw(sender, "status.routes-header", "count", list.size());
+            int shown = 0;
+            for (RouteTable.Info r : list) {
+                if (shown++ >= MAX_LINES) {
+                    plugin.messages().raw(sender, "status.more", "count", list.size() - MAX_LINES);
+                    break;
+                }
+                String kind = plugin.messages().get("status.kind-" + r.kind().toLowerCase(Locale.ROOT),
+                        "size", r.size() < 0 ? "" : size(r.size()));
+                plugin.messages().raw(sender, "status.route", "path", r.path(), "plugin", r.plugin(), "kind", kind);
             }
-            String kind = plugin.messages().get("status.kind-" + r.kind().toLowerCase(Locale.ROOT),
-                    "size", r.size() < 0 ? "" : size(r.size()));
-            plugin.messages().raw(sender, "status.route", "path", r.path(), "plugin", r.plugin(), "kind", kind);
+        }
+
+        // 顯示連接的外聯與更新插件
+        if (plugin.clientHub() != null) {
+            List<clre20.httpHub.api.HttpHubClientService.PluginClientInfo> clients = plugin.clientHub().getConnectedPlugins();
+            sender.sendMessage("§e=== 已連接的外聯與集中更新插件 (" + clients.size() + ") ===");
+            if (clients.isEmpty()) {
+                sender.sendMessage("§7目前尚無外部插件向 HttpHub 登記外聯或更新檢查。");
+            } else {
+                for (clre20.httpHub.api.HttpHubClientService.PluginClientInfo c : clients) {
+                    String updateTag = c.hasUpdate() ? "§c[有新版本: " + c.latestVersion() + "]" : "§a[最新版: " + c.latestVersion() + "]";
+                    sender.sendMessage("§f- §b" + c.pluginName() + " §7(v" + c.currentVersion() + ") " + updateTag
+                            + " §8| 請求數: §f" + c.requestCount() + " §8| Repo: §7" + c.repo());
+                }
+            }
         }
     }
 

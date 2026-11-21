@@ -1,261 +1,225 @@
 # HttpHub
 
-HttpHub 是一款專為 Paper 伺服器設計的共用 HTTP 伺服器插件。很多插件需要 HTTP（發送資源包、網頁面板、API），如果每個插件各自開一個端口，不但要開一堆防火牆，還很容易互相搶同一個端口而啟動失敗。裝了 HttpHub 之後，所有支援的插件都掛在同一個端口底下，各自使用自己的路徑，並由 HttpHub 統一處理連線安全與防護。
+HttpHub 是一款專為 Paper 26.x 伺服器設計的共用 HTTP 伺服器與集中外聯 HTTP 網關插件。
+
+在伺服器運作中，許多插件需要提供 HTTP 服務（例如發送自訂唱片資源包、提供網頁面板、Webhook 接收）或對外發送 HTTP 請求（例如檢查 GitHub Releases 更新、呼叫第三方 API）。若各插件各自開啟一個端口，將造成防火牆設定混亂並容易引發端口衝突；若各插件各自維護獨立的 `HttpClient` 與執行緒池，更會導致 JVM 虛擬執行緒與 Selector 數量失控。
+
+裝了 HttpHub 之後：
+1. **內部掛載**：所有支援的插件都共用同一個 HTTP 服務端口，各自掛載於專屬子路徑（如 `/<插件名稱>/...`）。
+2. **集中外聯**：所有外部插件皆可透過 `HttpHubAPI` 發起非同步 HTTP 請求與登記更新檢查，全服共用由 **Java 25 原生虛擬執行緒池（Virtual Threads）** 驅動的單例 `HttpClient`，大幅節省線程開銷與記憶體。
+
+---
 
 ## 功能特性
 
 * **一個端口給所有插件**：
-  * 每個插件的內容放在 `/<插件名稱>/` 底下（例如 `/customdisc/pack.zip`），不會互相覆蓋。
-  * 插件停用時，它註冊的路徑自動移除。
-  * `/httphub reload` 換端口時直接重開伺服器，已註冊的路徑全部保留。
-* **網址自動跟著玩家**：
-  * `public-url` 預設為 `auto`：玩家用什麼位址連進伺服器，下載網址就用那個位址，不用寫死 IP 或網域。
-  * 放在 Nginx 等反向代理後面時，填完整網址即可。
-* **內建防護**：
-  * 同一 IP 的同時連線數、每秒請求數都有上限，超過直接拒絕。
-  * 請求標頭有大小與時間限制，傳送或處理中連續沒有進度就切斷，防止故意慢慢傳的連線佔住伺服器。
-  * 有連線在排隊時自動進入壓力模式，縮短時限讓卡住的連線更快讓出位置；正常下載不受影響。
-  * 處理執行緒與排隊數量固定，不會因為大量連線而無限增加。
-  * 只提供插件放在記憶體裡的內容，不開放伺服器上的任何資料夾。
-* **所有文字都可自訂**：
-  * 聊天訊息、瀏覽器看到的錯誤頁面、後台訊息全部放在 `messages.yml`。
-  * `config.yml` 與 `messages.yml` 缺少的項目會在啟動與 `/httphub reload` 時自動補上，保留原本的值與註解。
-* **版本檢查**：
-  * 啟動時在後台向 GitHub Releases 檢查一次，也可以用 `/httphub version` 手動檢查；結果快取 10 分鐘，不會定時輪詢。
-  * 有新版本時，具有 `httphub.version` 權限的管理員登入 3 秒後會收到提醒；兩項功能都能在 `config.yml` 關閉。
+  * 每個插件的內容放在 `/<插件名稱>/` 底下（例如 `/customdisc/pack.zip`），路徑互不干擾。
+  * 插件停用時，它註冊的路徑會自動安全卸載。
+  * 支援 `/httphub reload`，更換端口時無縫重載。
+* **集中外聯 HTTP 請求接口（API）**：
+  * 提供 `HttpHubAPI.getStringAsync()` 與 `HttpHubAPI.sendAsync()`。
+  * 全伺服器共用單一 `HttpClient` 與 Java 25 虛擬執行緒池，徹底杜絕各插件自建 Selector 線程池造成的線程爆炸。
+* **集中版本檢查登記（Update Checker Hub）**：
+  * 提供 `HttpHubAPI.registerUpdateCheck()`，其他外掛無須自行維護連線輪詢與背景線程。
+  * 由 HttpHub 統一在後台向 GitHub Releases 查詢最新發行版，並由 HttpHub 自動於具備權限之管理員登入 3 秒後發送聊天室提醒。
+* **操作與調用稽核日誌（Audit Logging）**：
+  * 外部插件透過 HttpHub 進行的外聯請求與更新登記均會輸出清晰的 `[HttpHub] [Audit]` 日誌，透明紀錄連線來源與目標。
+* **`/httphub status` 狀態面板**：
+  * 即時列出伺服器運作狀態、各插件掛載端點、目前已連線/調用 API 的外部插件清單、請求計數與版本檢查結果。
+* **動態網址自動適配**：
+  * `public-url` 預設為 `auto`：玩家用什麼 IP 或網域連入伺服器，下載資源包就使用該網址，無須手動寫死。
+  * 支援放在 Nginx、Cloudflare 等反向代理後方。
+* **內建防護機制**：
+  * 單一 IP 連線速率限制（Rate Limit）、請求標頭超時斷線機制、固定執行緒保護，防止惡意連線拖垮伺服器。
+
+---
+
+## 支援環境
+
+* **伺服器核心**：Paper 26.3（標準穩定版）及更高版本（Java 25）
+* **相容核心**：Purpur 等標準 Paper 分支
+
+---
 
 ## 指令與權限
 
-本插件主指令為 `/httphub`。
+本插件主指令為 `/httphub`（別名 `/hhub`）。
 
 | 指令 | 說明 | 執行端 | 權限節點 | 預設 |
 | :--- | :--- | :--- | :--- | :--- |
 | `/httphub` 或 `/httphub help` | 顯示指令說明清單 | 遊戲內 / 控制台 | `httphub.help` | 所有人 |
-| `/httphub version` | 查看插件版本並檢查更新，有新版時登入會收到提醒 | 遊戲內 / 控制台 | `httphub.version` | OP |
-| `/httphub status` | 查看伺服器狀態、流量統計與各插件註冊的路徑 | 遊戲內 / 控制台 | `httphub.status` | OP |
-| `/httphub reload` | 重新載入設定，端口有變時重開伺服器 | 遊戲內 / 控制台 | `httphub.reload` | OP |
-
-> 指令別名：`/hhub` 等同 `/httphub`。`httphub.*` 包含以上所有權限。
-
-## 安裝與設定
-
-1. 把 jar 放進 `plugins/`，啟動一次伺服器。
-2. 在防火牆開放 `server.port`（預設 `52010`，TCP）。
-3. 支援 HttpHub 的插件會自動改用它，不需要另外設定。
-
-| 設定 | 說明 |
-| :--- | :--- |
-| `prefix` | 所有訊息的開頭文字（其他文字都在 `messages.yml`） |
-| `server.host` / `port` | 綁定的位址與端口 |
-| `server.public-url` | 對外網址；`auto` = 使用玩家連線的位址 |
-| `server.threads` / `queue` | 處理執行緒數量、最多排隊的連線數 |
-| `limits.max-connections-per-ip` | 同一 IP 同時最多幾個連線 |
-| `limits.requests-per-second` | 同一 IP 每秒最多幾個請求 |
-| `limits.stall-seconds` | 連續幾秒沒有進度就切斷 |
-| `limits.header-timeout-seconds` | 讀取請求標頭的時限 |
-| `limits.max-body-kb` | POST 內容上限 |
-| `limits.trusted-proxies` | 反向代理的 IP（沒有使用反向代理請保持空白） |
-| `update-checker.check-on-startup` | 啟動時是否檢查更新 |
-| `update-checker.notify-on-join` | 有新版時是否在管理員登入後提醒 |
-
-## 開發者：讓你的插件使用 HttpHub
-
-1. 加入依賴（[JitPack](https://jitpack.io/#clre20/HttpHub)）：
-
-```xml
-<repository>
-    <id>jitpack</id>
-    <url>https://jitpack.io</url>
-</repository>
-
-<dependency>
-    <groupId>com.github.clre20</groupId>
-    <artifactId>HttpHub</artifactId>
-    <version>v1.0.0</version>
-    <scope>provided</scope>
-</dependency>
-```
-
-2. 在 `plugin.yml` 加上 `softdepend: [ HttpHub ]`（一定要裝才能用的話改成 `depend`）。
-
-3. 把用到 HttpHub 的程式碼放在獨立的類別裡，確認 HttpHub 已啟用才建立它，沒裝 HttpHub 時才不會出現 `NoClassDefFoundError`：
-
-```java
-// 主類別：不要直接 import HttpHub 的類別
-Plugin hub = getServer().getPluginManager().getPlugin("HttpHub");
-if (hub != null && hub.isEnabled()) {
-    web = new HubWeb(this);      // 只有這個類別用到 HttpHub
-} else {
-    // 沒裝 HttpHub：自己開伺服器或停用網頁功能
-}
-```
-
-```java
-import clre20.httpHub.api.*;
-
-final class HubWeb {
-    private final HttpHubService hub = HttpHubService.get();
-    private final Route pack;
-
-    HubWeb(JavaPlugin plugin) {
-        // 靜態內容：網址是 /<插件名稱小寫>/pack.zip
-        pack = hub.serve(plugin, "pack.zip", bytes, "application/zip");
-
-        // 動態內容（完全相同的路徑）
-        hub.handle(plugin, "status.json", req -> Response.json(200, "{\"online\":" + online + "}"));
-
-        // 動態內容（含底下所有路徑）：/<插件>/api/...，req.subPath() 是後面的部分
-        hub.handlePrefix(plugin, "api", req -> Response.text(200, "你要的是 " + req.subPath()));
-    }
-
-    void update(byte[] newBytes) {
-        pack.update(newBytes);       // 換內容，網址不變
-    }
-
-    String urlFor(Player player) {
-        return hub.url(player, pack); // 例如 http://play.example.com:52010/myplugin/pack.zip，取不到位址時為 null
-    }
-}
-```
-
-注意事項：
-
-* 路徑只能用英數字與 `. _ - ~ /`，不能有 `..`、`//`，否則丟出 `IllegalArgumentException`。同一個插件註冊相同路徑時，新的取代舊的。
-* 插件停用時路徑會自動移除，不需要自己清。
-* 動態處理器在 HttpHub 的執行緒上執行，**不是主執行緒**：要讀取世界、玩家等資料時，請在主執行緒先準備好快取。處理超過 `stall-seconds` 會被中斷，丟出例外則回應 500。
-* `Request` 的所有內容（路徑、參數、標頭、內容）都來自外部，使用前請自行驗證；需要權限的頁面請自行做驗證。
-* 資源包網址可以在後面加上 `?v=<雜湊值>`，內容更新時網址也會不同。
+| `/httphub status` | 查看伺服器狀態、掛載路徑、已連接外部插件與更新檢查統計 | 遊戲內 / 控制台 | `httphub.status` | OP |
+| `/httphub version` | 查看插件版本並檢查更新 | 遊戲內 / 控制台 | `httphub.version` | OP |
+| `/httphub reload` | 重新載入設定檔 | 遊戲內 / 控制台 | `httphub.reload` | OP |
 
 ---
 
-# HttpHub
+## 開發者 API：讓你的插件使用 HttpHub
 
-HttpHub is a shared HTTP server plugin for Paper . Many plugins need HTTP (resource pack delivery, web panels, APIs). When each plugin opens its own port you have to open many firewall ports, and plugins easily fail to start because they fight over the same one. With HttpHub, every supporting plugin runs under one port with its own path, and HttpHub handles connection safety and protection for all of them.
+外部插件可以將 HttpHub 作為共用的 HTTP 服務端（提供檔案下載）與集中外聯 HTTP 客戶端（發起請求與檢查更新）。
 
-## Features
+### 1. Maven 依賴配置
 
-* **One port for every plugin**:
-  * Each plugin's content lives under `/<plugin name>/` (e.g. `/customdisc/pack.zip`), so plugins never overwrite each other.
-  * When a plugin is disabled, its routes are removed automatically.
-  * `/httphub reload` restarts the server when the port changes; all registered routes are kept.
-* **URLs follow the player**:
-  * `public-url` defaults to `auto`: download URLs use whatever address the player connected with, so you never hard-code an IP or domain.
-  * Behind a reverse proxy such as Nginx, just set the full URL.
-* **Built-in protection**:
-  * Concurrent connections and requests per second are capped per IP; excess requests are rejected.
-  * Request headers are limited in size and time, and connections that make no progress while sending or processing are cut, so deliberately slow clients cannot tie up the server.
-  * When connections are queued, a pressure mode shortens the time limits so stuck connections give up their slot sooner; normal downloads are not affected.
-  * Worker threads and the queue have a fixed size and never grow with connection count.
-  * Only content that plugins hold in memory is served; no folder on the server is ever exposed.
-* **Every message is customizable**:
-  * Chat messages, error pages shown in browsers, and console messages all live in `messages.yml`.
-  * Missing keys in `config.yml` and `messages.yml` are filled in on startup and `/httphub reload`, keeping your values and comments.
-* **Update checker**:
-  * Checks GitHub Releases once in the background on startup, or manually with `/httphub version`; results are cached for 10 minutes and never polled.
-  * When a new version exists, admins with `httphub.version` are notified 3 seconds after joining; both features can be turned off in `config.yml`.
-
-## Supported Plugins
-
-* [CustomDisc](https://github.com/clre20/CustomDisc): resource pack delivery for custom music discs and horns.
-
-## Commands & Permissions
-
-The main command is `/httphub`.
-
-| Command | Description | Executor | Permission | Default |
-| :--- | :--- | :--- | :--- | :--- |
-| `/httphub` or `/httphub help` | Show the command list | In-game / Console | `httphub.help` | Everyone |
-| `/httphub version` | Show the plugin version and check for updates; admins are notified on join | In-game / Console | `httphub.version` | OP |
-| `/httphub status` | Show server state, traffic stats and every plugin's routes | In-game / Console | `httphub.status` | OP |
-| `/httphub reload` | Reload settings; restarts the server if the port changed | In-game / Console | `httphub.reload` | OP |
-
-> Alias: `/hhub` is the same as `/httphub`. `httphub.*` grants all permissions above.
-
-## Installation & Configuration
-
-1. Put the jar in `plugins/` and start the server once.
-2. Open `server.port` (default `52010`, TCP) in your firewall.
-3. Plugins that support HttpHub switch to it automatically; nothing else to configure.
-
-| Option | Description |
-| :--- | :--- |
-| `prefix` | Prefix for all plugin messages (all other text is in `messages.yml`) |
-| `server.host` / `port` | Bind address and port |
-| `server.public-url` | Public URL; `auto` = the player's connection address |
-| `server.threads` / `queue` | Worker thread count and maximum queued connections |
-| `limits.max-connections-per-ip` | Maximum concurrent connections per IP |
-| `limits.requests-per-second` | Maximum requests per second per IP |
-| `limits.stall-seconds` | Cut a connection after this many seconds without progress |
-| `limits.header-timeout-seconds` | Time limit for reading request headers |
-| `limits.max-body-kb` | Maximum POST body size |
-| `limits.trusted-proxies` | Reverse proxy IPs (leave empty if you don't use one) |
-| `update-checker.check-on-startup` | Check for updates on startup |
-| `update-checker.notify-on-join` | Remind admins on join when a new version exists |
-
-## Developers: Using HttpHub in Your Plugin
-
-1. Add the dependency ([JitPack](https://jitpack.io/#clre20/HttpHub)):
+在你的插件 `pom.xml` 中加入：
 
 ```xml
-<repository>
-    <id>jitpack</id>
-    <url>https://jitpack.io</url>
-</repository>
-
 <dependency>
-    <groupId>com.github.clre20</groupId>
+    <groupId>clre20</groupId>
     <artifactId>HttpHub</artifactId>
-    <version>v1.0.0</version>
+    <version>1.0.1</version>
     <scope>provided</scope>
 </dependency>
 ```
 
-2. Add `softdepend: [ HttpHub ]` to `plugin.yml` (use `depend` if your plugin requires it).
+### 2. plugin.yml 配置
 
-3. Keep the code that uses HttpHub in a separate class and only create it once HttpHub is enabled, so servers without HttpHub never hit `NoClassDefFoundError`:
+加入軟依賴（Softdepend）：
 
-```java
-// Main class: do not import HttpHub classes here
-Plugin hub = getServer().getPluginManager().getPlugin("HttpHub");
-if (hub != null && hub.isEnabled()) {
-    web = new HubWeb(this);      // the only class that touches HttpHub
-} else {
-    // No HttpHub: run your own server or disable web features
-}
+```yaml
+softdepend: [ HttpHub ]
 ```
 
+### 3. Java 程式碼調用範例
+
+#### A. 集中版本檢查登記（推薦所有外掛使用）
+省去外掛各自開啟背景連線線程，統一由 HttpHub 查詢並自動在管理員登入 3 秒後通知：
+
 ```java
-import clre20.httpHub.api.*;
+import clre20.httpHub.api.HttpHubAPI;
 
-final class HubWeb {
-    private final HttpHubService hub = HttpHubService.get();
-    private final Route pack;
-
-    HubWeb(JavaPlugin plugin) {
-        // Static content: served at /<lowercase plugin name>/pack.zip
-        pack = hub.serve(plugin, "pack.zip", bytes, "application/zip");
-
-        // Dynamic content (exact path)
-        hub.handle(plugin, "status.json", req -> Response.json(200, "{\"online\":" + online + "}"));
-
-        // Dynamic content (path and everything below): /<plugin>/api/..., req.subPath() is the rest
-        hub.handlePrefix(plugin, "api", req -> Response.text(200, "You asked for " + req.subPath()));
-    }
-
-    void update(byte[] newBytes) {
-        pack.update(newBytes);       // replace the content; the URL stays the same
-    }
-
-    String urlFor(Player player) {
-        return hub.url(player, pack); // e.g. http://play.example.com:52010/myplugin/pack.zip, or null if unknown
+public class MyPlugin extends JavaPlugin {
+    @Override
+    public void onEnable() {
+        if (getServer().getPluginManager().isPluginEnabled("HttpHub") && HttpHubAPI.isAvailable()) {
+            HttpHubAPI.registerUpdateCheck(this, "clre20/MyPlugin", getPluginMeta().getVersion(), "myplugin.version", info -> {
+                if (info.hasUpdate()) {
+                    getLogger().warning("發現新版本: " + info.latestVersion() + " (目前: " + info.currentVersion() + ")");
+                }
+            });
+        }
     }
 }
 ```
 
-Notes:
+#### B. 非同步發送 HTTP GET 請求
+使用伺服器共用的虛擬執行緒 HttpClient 發起請求：
 
-* Paths may only use letters, digits and `. _ - ~ /`, and may not contain `..` or `//`; otherwise `IllegalArgumentException` is thrown. Registering the same path again from the same plugin replaces the old route.
-* Routes are removed automatically when your plugin is disabled.
-* Dynamic handlers run on HttpHub's threads, **not the main thread**: prepare a cache on the main thread for world or player data. Handlers running longer than `stall-seconds` are interrupted, and exceptions produce a 500 response.
-* Everything in `Request` (path, query, headers, body) comes from outside; validate it before use, and add your own authentication for protected pages.
-* You can append `?v=<hash>` to resource pack URLs so the URL changes whenever the content does.
+```java
+HttpHubAPI.getStringAsync(this, "https://api.github.com/zen")
+    .thenAccept(body -> {
+        getLogger().info("GitHub 回傳: " + body);
+    })
+    .exceptionally(err -> {
+        getLogger().warning("請求失敗: " + err.getMessage());
+        return null;
+    });
+```
+
+#### C. 掛載提供資源包或網頁端點
+```java
+import clre20.httpHub.api.HttpHubProvider;
+import clre20.httpHub.api.HttpServerHub;
+
+HttpServerHub hub = HttpHubProvider.get();
+if (hub != null) {
+    // 註冊 /myplugin/pack.zip 端點
+    hub.registerBytes("myplugin", "pack.zip", "application/zip", zipByteArray);
+}
+```
+
+---
+
+# HttpHub (English)
+
+HttpHub is a shared HTTP server and centralized outbound HTTP gateway plugin designed for Paper 26.x servers.
+
+In modern Minecraft servers, many plugins require HTTP capabilities (such as serving custom music packs, web dashboards, receiving webhooks) or making outbound HTTP calls (such as GitHub update checks and REST APIs). Running multiple standalone HTTP servers causes port conflicts and firewall overhead; similarly, maintaining independent `HttpClient` instances and thread pools leads to excessive memory consumption and thread explosion.
+
+With HttpHub:
+1. **Inbound Routing**: All plugins share a single port, safely routed under dedicated prefixes (e.g. `/<plugin-name>/...`).
+2. **Outbound Gateway**: External plugins leverage `HttpHubAPI` for asynchronous requests and centralized update checking, powered by a singleton `HttpClient` on **Java 25 native Virtual Threads**.
+
+---
+
+## Features
+
+* **Single Port for All Plugins**:
+  * Dedicated route prefixes per plugin (`/<plugin-name>/...`).
+  * Automatic unregistration upon plugin disable.
+  * Seamless port reloading via `/httphub reload`.
+* **Centralized Outbound HTTP Gateway (API)**:
+  * Exposes `HttpHubAPI.getStringAsync()` and `HttpHubAPI.sendAsync()`.
+  * Single shared `HttpClient` backed by Java 25 Virtual Threads, preventing OS thread exhaustion.
+* **Centralized Update Checking**:
+  * Exposes `HttpHubAPI.registerUpdateCheck()`.
+  * Background querying via virtual threads with automatic operator login alerts after 3 seconds.
+* **Audit Logging**:
+  * Outbound requests and registrations generate clear `[HttpHub] [Audit]` console logs for monitoring.
+* **`/httphub status` Dashboard**:
+  * Real-time metrics showing server status, registered endpoints, connected plugins, outbound request counts, and update statuses.
+* **Dynamic Auto URL Adaptation**:
+  * Automatic detection of player connection hostnames for seamless resource pack downloading without hardcoded IPs.
+
+---
+
+## Requirements
+
+* **Server Core**: Paper 26.3 (Stable) or higher (Java 25).
+* **Compatible Forks**: Purpur and other standard Paper forks.
+
+---
+
+## Commands & Permissions
+
+Primary command: `/httphub` (alias `/hhub`).
+
+| Command | Description | Sender | Permission | Default |
+| :--- | :--- | :--- | :--- | :--- |
+| `/httphub help` | View command help list | Player / Console | `httphub.help` | Everyone |
+| `/httphub status` | View server status, endpoints, connected plugins and update stats | Player / Console | `httphub.status` | OP |
+| `/httphub version` | View version and check for updates | Player / Console | `httphub.version` | OP |
+| `/httphub reload` | Reload configuration | Player / Console | `httphub.reload` | OP |
+
+---
+
+## Developer API: Using HttpHub in Your Plugin
+
+External plugins can leverage HttpHub as both an inbound file server and an outbound HTTP client.
+
+### 1. Maven Dependency
+
+```xml
+<dependency>
+    <groupId>clre20</groupId>
+    <artifactId>HttpHub</artifactId>
+    <version>1.0.1</version>
+    <scope>provided</scope>
+</dependency>
+```
+
+### 2. plugin.yml Configuration
+
+```yaml
+softdepend: [ HttpHub ]
+```
+
+### 3. Java Usage Examples
+
+#### Centralized Update Check Registration
+```java
+import clre20.httpHub.api.HttpHubAPI;
+
+if (getServer().getPluginManager().isPluginEnabled("HttpHub") && HttpHubAPI.isAvailable()) {
+    HttpHubAPI.registerUpdateCheck(this, "clre20/MyPlugin", getPluginMeta().getVersion(), "myplugin.version", info -> {
+        if (info.hasUpdate()) {
+            getLogger().warning("New version available: " + info.latestVersion());
+        }
+    });
+}
+```
+
+#### Shared Outbound GET Request
+```java
+HttpHubAPI.getStringAsync(this, "https://api.example.com/data")
+    .thenAccept(body -> getLogger().info("Response: " + body));
+```
